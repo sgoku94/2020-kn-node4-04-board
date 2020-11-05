@@ -3,8 +3,10 @@ require('dotenv').config();
 const express = require('express');
 const app = express();
 const path = require('path');
+const {upload} = require('./modules/multer-conn');
 
 // modules
+const logger = require('./modules/morgan-conn');
 const {pool} = require('./modules/mysql-conn');
 const boardRouter = require('./routes/board');
 const galleryRouter = require('./routes/gallery');
@@ -17,12 +19,15 @@ app.set('view engine', 'pug');
 app.set('views', path.join(__dirname, './views'));
 app.locals.pretty = true;
 
-// moddleware
+// middleware
+app.use(logger);
 app.use(express.json());
 app.use(express.urlencoded({extended: false}));
 
+
 // router
 app.use('/', express.static(path.join(__dirname, './public')));
+app.use('/storage', express.static(path.join(__dirname, './uploads')));
 app.use('/board', boardRouter);
 app.use('/gallery', galleryRouter);
 /* 
@@ -31,6 +36,15 @@ app.use('/gallery', galleryRouter);
   const err = new Error();
   next(err);
 }); */
+
+app.get('/test/upload', (req,res,next) => {
+  res.render('test/upload');
+});
+
+app.post('/test/save', upload.single('upfile'), (req,res,next) => {
+  const {title, upfile} = req.body;
+  res.redirect('/board');
+});
 
 // 예외처리
 app.use((req,res,next) => {
