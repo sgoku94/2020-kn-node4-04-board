@@ -21,6 +21,11 @@ app.locals.pretty = true;
 
 // middleware
 app.use(logger);
+/* app.use((req, res, next) => {
+  express.json()(req,res,next);
+}); 
+app.use(express.json()); -> 위와 같음
+*/
 app.use(express.json());
 app.use(express.urlencoded({extended: false}));
 
@@ -42,8 +47,10 @@ app.get('/test/upload', (req,res,next) => {
 });
 
 app.post('/test/save', upload.single('upfile'), (req,res,next) => {
-  const {title, upfile} = req.body;
-  res.redirect('/board');
+  // const {title, upfile} = req.body;
+  // res.redirect('/board');
+  // res.json(req.allowUpload);
+  res.json(req.file);
 });
 
 // 예외처리

@@ -17,7 +17,9 @@ block content
           tr
             td=v.id
             td.text-left
-              a(href=`/board/view/${v.id}`)=v.title
+              a(href=`/board/view/${v.id}`)= v.title
+                if v.savefile
+                  i.fa.fa-file.ml-2
             td=v.writer
             td.text-left=v.content
             td=v.wdate
