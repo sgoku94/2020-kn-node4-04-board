@@ -4,21 +4,21 @@ const path = require('path');
 const fs = require('fs-extra');
 const createErrors = require('http-errors');
 const router = express.Router();
-const {pool} = require('../modules/mysql-conn');
-const {alert, uploadFolder} = require('../modules/util');
+const {pool, sqlGen} = require('../modules/mysql-conn');
+const {alert, uploadFolder, imgFolder, extGen} = require('../modules/util');
 const {upload, imgExt} = require('../modules/multer-conn');
 
 router.get(['/', '/list'], async (req,res,next) => {
-  let connect, rs, sql, values, pug;
+  let connect, rs, pug;
   pug = {
     title: '게시판 리스트',
     js: 'board',
     css: 'board'
   };
   try {
-    sql = 'SELECT * FROM board ORDER BY id DESC';
+    let temp = sqlGen('board', {mode: 'S', desc: 'ORDER BY id DESC'});
     connect = await pool.getConnection();
-    rs = await connect.query(sql);
+    rs = await connect.query(temp.sql);
     connect.release();
     pug.lists = rs[0];
     pug.lists.forEach((v) => {
@@ -27,7 +27,7 @@ router.get(['/', '/list'], async (req,res,next) => {
     res.render('./board/list.pug', pug);
   }catch(e) {
     if(connect) connect.release();
-    next(createErrors(500, e.sqlMessage));
+    next(createErrors(500, e.sqlMessage || e));
   }
 });
 
@@ -40,130 +40,116 @@ router.get('/write', (req,res,next) => {
   res.render('./board/write.pug', pug);
 });
 
-router.post('/save', upload.single('upfile'), async (req,res,next) => {
-  let connect, rs, sql, values, pug;
-  let {title, content, writer} = req.body;
-  try{
-    values = [title,content,writer];
-    sql = 'INSERT INTO board SET title=?, content=?, writer=?';
-
-    if(req.allowUpload) {
-      if(req.allowUpload.allow){
-        sql += ', savefile=?, realfile=?';
-        values.push(req.file.filename);
-        values.push(req.file.originalname);
-      }else{
-        res.send(alert(`${req.allowUpload.ext}은(는) 업로드 할 수 없습니다.`, '/board'));
-      }
-    }
-    connect = await pool.getConnection();
-    rs = await connect.query(sql, values);
-    connect.release();
-    // res.json(rs);
-    res.redirect('/board');
-  }
-  catch(e){
-    if(connect) connect.release();
-    next(createErrors(500, e.sqlMessage));
-  }
-
+router.post('/save', upload.single('upfile'), async (req, res, next) => {
+	let connect, rs;
+	try {
+		if(req.allow === false) {
+			res.send(alert(`${req.ext}은(는) 업로드 할 수 없습니다.`, '/board'));
+		}
+		else {
+			let temp = sqlGen('board', {
+				mode: 'I', 
+				field: ['title', 'writer', 'content'], 
+				data: req.body,
+				file: req.file
+			});
+			connect = await pool.getConnection();
+			rs = await connect.query(temp.sql, temp.values);
+			connect.release();
+			res.redirect('/board');
+		}
+	}
+	catch(e) {
+		if(connect) connect.release();
+		next(createError(500, e.sqlMessage));
+	}
 });
 
 router.get('/view/:id', async (req, res, next) => {
-  let connect, rs, sql, values, pug;
+  let connect, rs, pug;
   try{
     pug = {
       title: '게시판 상세보기',
       js: 'board',
       css: 'board'
     };
-    sql = "SELECT * FROM board WHERE id=?";
-    values = [req.params.id];
+    let temp = sqlGen('board', {mode: 'S', id: req.params.id});
     connect = await pool.getConnection();
-    rs = await connect.query(sql, values);
+    rs = await connect.query(temp.sql);
+    connect.release();
     pug.list = rs[0][0];
     pug.list.wdate = moment(pug.list.wdate).format('YYYY-MM-DD HH:mm:ss');
     if(pug.list.savefile){
-      var ext = path.extname(pug.list.savefile).toLowerCase().replace(".", "");
-      if(imgExt.indexOf(ext) > -1){
-        pug.list.imgSrc = `/storage/${pug.list.savefile.substr(0, 6)}/${pug.list.savefile}`;
+      if(imgExt.includes(extGen(pug.list.savefile))){
+        pug.list.imgSrc = imgFolder(pug.list.savefile);
       }
-      pug.list.download = `/storage/${pug.list.savefile.substr(0, 6)}/${pug.list.savefile}`;
     };
-    connect.release();
     res.render('./board/view.pug', pug);
   }catch(e) {
     if(connect) connect.release();
-    next(createErrors(500, e.sqlMessage));
+    next(createErrors(500, e.sqlMessage || e));
   }
 });
 
 router.get('/delete/:id', async (req, res, next) => {
-  let connect, rs, sql, values, pug;
+  let connect, rs, temp;
   try{
-    sql = "DELETE FROM board WHERE id=?";
-    values = [req.params.id];
     connect = await pool.getConnection();
-    rs = await connect.query(sql, values);
+    temp = sqlGen('board', {mode: 'S', id: req.params.id, field: ['savefile']});
+    rs = await connect.query(temp.sql);
+    if(rs[0][0].savefile) await fs.remove(uploadFolder(rs[0][0].savefile));
+    temp = sqlGen('board', {mode: 'D', id: req.params.id});
+    rs = await connect.query(temp.sql);
     connect.release();
     res.send(alert('삭제되었습니다.', '/board'));
   }catch(e){
     if(connect) connect.release();
-    next(createErrors(500, e.sqlMessage));
+    next(createErrors(500, e.sqlMessage || e));
   }
 });
 
 router.get('/update/:id', async (req,res,next) => {
-  let connect, rs, sql, values, pug;
+  let connect, rs, pug, temp;
   try{
-    pug = {
-      title: '게시글 수정',
-      js: 'board',
-      css: 'board'
-    };
-    sql = "SELECT * FROM board WHERE id=?";
-    values = [req.params.id];
+    pug = {title: '게시글 수정',js: 'board',css: 'board'};
+    temp = sqlGen('board', {mode: 'S', id: req.params.id})
     connect = await pool.getConnection();
-    rs = await connect.query(sql, values);
+    rs = await connect.query(temp.sql);
     connect.release();
     pug.list = rs[0][0];
     res.render('./board/write.pug', pug);
   }catch(e) {
     if(connect) connect.release();
-    next(createErrors(500, e.sqlMessage));
+    next(createErrors(500, e.sqlMessage || e));
   }
 });
 
 router.post('/saveUpdate', upload.single('upfile'), async (req, res, next) => {
-	let connect, rs, sql, sqlRoot, values, pug;
-	let { id, title, writer, content } = req.body;
+	let connect, rs, temp;
 	try {
-		sqlRoot = 'UPDATE board SET title=?, writer=?, content=?';
-		values = [title, writer, content];
-		if(req.allowUpload) {
-			if(req.allowUpload.allow) {
-				sql = 'SELECT savefile FROM board WHERE id='+id;
-				connect = await pool.getConnection();
-				rs = await connect.query(sql);
-				if(rs[0][0].savefile) fs.removeSync(uploadFolder(rs[0][0].savefile));
-				sqlRoot += ', savefile=?, realfile=?';
-				values.push(req.file.filename);
-				values.push(req.file.originalname);
+		if(req.allow === false) res.send(alert(`${req.ext}은(는) 업로드 할 수 없습니다.`, '/board'));
+		else {
+			connect = await pool.getConnection();
+			if(req.file) {
+				temp = sqlGen('board', {mode: 'S', id: req.body.id, field: ['savefile']});
+				rs = await connect.query(temp.sql);
+				if(rs[0][0].savefile) await fs.remove(uploadFolder(rs[0][0].savefile));
 			}
-			else {
-				res.send(alert(`${req.allowUpload.ext}은(는) 업로드 할 수 없습니다.`, '/board'));
-			}
+			temp = sqlGen('board', {
+				mode: 'U', 
+				id: req.body.id, 
+        field: ['title', 'writer', 'content'],
+        data: req.body,
+				file: req.file
+			});
+			rs = await connect.query(temp.sql, temp.values);
+			connect.release();
+			res.send(alert('수정되었습니다', '/board'));
 		}
-		sqlRoot += ' WHERE id='+id;
-		connect = await pool.getConnection();
-		rs = await connect.query(sqlRoot, values);
-		connect.release();
-		if(rs[0].affectedRows == 1) res.send(alert('수정되었습니다', '/board'));
-		else res.send(alert('수정에 실패하였습니다.', '/board'));
 	}
 	catch(e) {
 		if(connect) connect.release();
-		next(createError(500, e.sqlMessage));
+		next(createError(500, e.sqlMessage || e));
 	}
 });
 
@@ -173,31 +159,25 @@ router.get('/download', (req, res, next) => {
 });
 
 router.get('/fileRemove/:id', async (req, res, next) => {
-	let connect, rs, sql, values, list, pug;
+	let connect, rs, temp;
 	try {
-		sql = 'SELECT * FROM board WHERE id='+req.params.id;
-		connect = await pool.getConnection();
-    rs = await connect.query(sql);
+    connect = await pool.getConnection();
+    temp = sqlGen('board', {mode: 'S', id: req.params.id, field: ['savefile']});
+    rs = await connect.query(temp.sql);
+    if(rs[0][0].savefile) await fs.remove(uploadFolder(rs[0][0].savefile));
+    temp = sqlGen('board', {
+      mode: 'U',
+      id: req.params.id,
+      field: ['realfile', 'savefile'],
+      data: {realfile: null, savefile: null}
+    });
+    rs = await connect.query(temp.sql, temp.values);
     connect.release();
-		list = rs[0][0];
-		if(list.savefile) {
-			let savefile = path.join(__dirname, '../uploads', list.savefile.substr(0, 6), list.savefile);
-			try {
-        fs.removeSync(uploadFolder(list.savefile));
-        sql = 'UPDATE board SET savefile=NULL, realfile=NULL';
-        connect = await pool.getConnection();
-        rs = await connect.query(sql);
-        connect.release();
-				res.json({code: 200});
-			}
-			catch(e) {
-				res.json({code: 500, err: e});
-			}
-		}
+    res.json({code: 200});
 	}
 	catch(e) {
 		if(connect) connect.release();
-		next(createError(500, e.sqlMessage));
+		res.json({code: 500, err: e});
 	}
 });
 

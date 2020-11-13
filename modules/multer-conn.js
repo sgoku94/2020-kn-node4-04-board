@@ -30,12 +30,14 @@ const makeFolder = () => {
 
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase().replace(".", "");
-  if(allowExt.indexOf(ext) > -1){
-    req.allowUpload = {allow: true, ext};
+  if(allowExt.includes(ext)){
+    req.allow = true;
+    req.ext = ext;
     cb(null, true);
   }
   else {
-    req.allowUpload = {allow: false, ext};
+    req.allow = false;
+    req.ext = ext;
     cb(null, false);
   }
 
@@ -52,6 +54,7 @@ const storage = multer.diskStorage({
     cb(null, saveName);
   }
 });
+
 
 const upload = multer({ storage, fileFilter, limits : {fileSize: 2048000}});
 
